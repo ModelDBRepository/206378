@@ -1,2 +1,7 @@
 load_file("nrngui.hoc")
-load_file("run_me.hoc")
+
+xpanel("Ferrante & Ascoli 2015 simulations")
+  xbutton("Short demo subsample of Figure 3F orange curve","load_file(\"Fig3F_OrangeCurveSubSampled.hoc\")")
+  xbutton("Long default run (2 hours 10 minutes","load_file(\"run_me.hoc\")")
+xpanel()
+

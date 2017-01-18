@@ -1,0 +1,670 @@
+load_file("nrngui.hoc")
+
+tstop=50
+
+sim=14 //  sim=49 in the paper; it was changed here to speed up simulations
+
+nsyn=40
+
+nfs=105
+nrs=170
+
+xopen("c20465.hoc")
+
+rs_sil=0.0006
+fs_sil=0.0006
+
+MODELTYPE = 0
+use_mcell_ran4(1)
+lowindex = 1001
+mcell_ran4_init(lowindex)
+highindex = 1
+
+print "---------------------------SIM running-----------------------------"
+
+
+NMDAFLAG = 0
+
+if (NMDAFLAG == 0) { //only AMPA-R
+    wtAmpa = 1
+    wtNmda = 0
+} else { //NMDAFLAG = 1, with both AMPA-R, NMDA-R
+    wtAmpa = 0.8
+    wtNmda = 0.2
+}
+
+soma area(0.5) 
+
+
+TOTALDEND = APIDENDMAX + BASDENDMAX + 3 //"3": counting start at 0
+
+objref dend[TOTALDEND],apc,rc,rd,fs,rs,rex,rob,rtrp,ror,rexfs,rexrs,pc,rci,h,u, Ens[3000], syn[3000], nc[3000],Ensi[3000], syni[3000], nci[3000],Ensii[3000], synii[3000], ncii[3000]
+
+strdef dend2, trunk
+
+index = 0
+
+forsec "dendrite" { //this will includes both dendrites and apical-dendrites
+    dend[index] = new SectionRef()
+    index += 1
+}
+
+//quadratic function fitting result A and B are set in cell's hoc file
+A = 0.0036
+B = 156
+
+//synapses rise and decay time constants from andrasfalvy mody
+
+TAU1e=0.5 
+TAU2e=5.5 
+
+TAU1i=0.73
+TAU2i=6.5 
+
+dist=1
+rel=0.1
+
+Rm = 28000    //unit: Ohm-cm^2
+RmDend = Rm/1
+RmSoma = Rm
+RmAx = Rm
+
+Cm    = 1
+CmSoma= Cm
+CmAx  = Cm
+CmDend = Cm*1
+
+RaAll= 50  //unit: Ohm-cm
+RaSoma=50  
+RaAx = 50
+
+Vrest = -65
+gna =  .02  
+AXONM = 2
+gkdr = 0.01
+celsius = 35.0  
+KMULT =  0.025  
+KMULTP = 0.025  
+ghd=0.00005
+nash=0
+
+
+forsec "axon" {insert pas e_pas=Vrest g_pas = 1/RmAx Ra=RaAx cm=CmAx}
+
+forsec "soma" {
+                insert pas e_pas=Vrest g_pas = 1/RmSoma Ra=RaSoma cm=CmSoma
+                insert ds 
+}
+
+forsec "dendrite" {insert pas e_pas=Vrest g_pas = 1/RmDend Ra=RaAll cm=CmDend}
+
+forsec "user5" {insert pas e_pas=Vrest g_pas = 1/RmDend Ra=RaAll  cm=CmDend}
+
+
+access soma
+freq=50
+load_file("fixnseg.hoc")
+geom_nseg()
+
+tot=0
+forall {tot=tot+nseg}
+distance()
+maxdist=0
+forsec "user5" for(x) {if (distance(x)>maxdist) {maxdist=distance(x)}}
+
+
+forsec "axon" {   
+                insert nax gbar_nax=gna * AXONM	sh_nax=nash
+                insert kdr gkdrbar_kdr=gkdr 
+                insert kap gkabar_kap = KMULTP*0.2
+}
+
+forsec "soma" {   
+                insert hd ghdbar_hd=ghd	vhalfl_hd=-73
+                insert na3 ar_na3=1 sh_na3=nash gbar_na3=gna
+                insert kdr gkdrbar_kdr=gkdr
+                insert kap gkabar_kap = KMULTP       
+}
+
+/*---------------------setting up apical oblique dendrite channel kinetics--------*/
+for (i=0; i<= APIDENDMAX; i += 1) {
+        access apical_dendrite[i] {
+	insert ds
+                if (diam>0.35) {factor=1} else {factor=1}
+                insert hd ghdbar_hd=ghd
+                insert na3 ar_na3=1 gbar_na3=gna*factor sh_na3=nash
+                insert kdr gkdrbar_kdr=gkdr*factor
+                insert kap gkabar_kap=0
+                insert kad gkabar_kad=0
+
+                for (x) if (x>0 && x<1) { xdist = distance(x)
+                        ghdbar_hd(x) = factor*ghd*(1+3*xdist/100)
+                                if (xdist > 100){
+                                        vhalfl_hd=-81
+                                        gkabar_kad(x) = factor*KMULT*(1+xdist/100)
+                                        } else {
+                                        vhalfl_hd=-73
+                                        gkabar_kap(x) = factor*KMULTP*(1+xdist/100)
+                                        }
+                }
+        }
+}
+
+
+/*---------------------setting up basal dendrite channel kinetics--------*/
+for (i=0; i <= BASDENDMAX; i += 1) { 
+	access dendrite[i] { 
+		if (diam>0.35) {factor=1} else {factor=1}
+		insert hd ghdbar_hd=ghd
+                insert na3 ar_na3=1 gbar_na3=gna*factor sh_na3=nash
+                insert kdr gkdrbar_kdr=gkdr*factor
+		insert kap gkabar_kap=0
+		insert kad gkabar_kad=0
+
+		for (x) if (x>0 && x<1) { xdist = distance(x)
+                	ghdbar_hd(x) = factor*ghd*(1+3*xdist/100)
+                		if (xdist > 100){
+					vhalfl_hd=-81
+                        		gkabar_kad(x) = factor*KMULT*(1+xdist/100)
+                			} else {
+					vhalfl_hd=-73
+                        		gkabar_kap(x) = factor*KMULTP*(1+xdist/100)
+               				}
+		}
+	}
+}
+
+
+/*----------------------------setting up main trunk channel kinetics-------------*/
+forsec "user5" {   // the main trunk
+    insert ds
+		insert hd ghdbar_hd=ghd
+    insert na3 ar_na3=1 gbar_na3=gna sh_na3=nash
+    insert kdr gkdrbar_kdr=gkdr
+		insert kap gkabar_kap=0
+		insert kad gkabar_kad=0
+
+		for (x) if (x>0 && x<1) { xdist = distance(x)
+                	ghdbar_hd(x) = ghd*(1+3*xdist/100)
+                		if (xdist > 100){
+					vhalfl_hd=-81
+          gkabar_kad(x) = KMULT*(1+xdist/100)
+                			} else {
+					vhalfl_hd=-73
+          gkabar_kap(x) = KMULTP*(1+xdist/100)
+               				}
+		}
+
+}
+
+// ---------------------- Graph ---------------------------------
+
+h = new VBox()
+h.intercept(1)
+
+
+u = new Graph()		
+u.size(0, 700, 0, 1)	
+
+u.beginline()	
+
+xpanel("")
+
+xpanel()
+h.intercept(0)
+h.map()
+// ---------------------- End Graph ---------------------------------
+
+access soma
+
+proc init() {
+	t=0
+        forall {
+        v=Vrest
+        if (ismembrane("nax") || ismembrane("na3")) {ena=55}	
+        if (ismembrane("kdr") || ismembrane("kap") || ismembrane("kad")) {ek=-90}
+        if (ismembrane("hd") ) {ehd_hd=-30}
+	}
+	finitialize(Vrest)
+        fcurrent()
+
+        forall {
+	for (x) {
+	if (ismembrane("na3")||ismembrane("nax")){e_pas(x)=v(x)+(ina(x)+ik(x))/g_pas(x)}
+	if (ismembrane("hd")) {e_pas(x)=e_pas(x)+i_hd(x)/g_pas(x)}
+		}
+	}
+	cvode.re_init()
+	cvode.event(tstop)
+	access soma
+}
+
+
+dt = 0.1
+steps_per_ms = 1/dt
+
+choice = 1
+
+if (choice == 1 || choice == 2) {
+    BEGINSECTION= 0
+    ENDSECTION= TOTALDEND - 1
+} else {
+    BEGINSECTION= 0
+    ENDSECTION= BASDENDMAX
+} 
+
+rc = new Random()
+rc.MCellRan4(highindex+1)
+rc.uniform(BEGINSECTION, ENDSECTION) 
+
+rd = new Random()
+rd.MCellRan4(highindex+2)
+rd.uniform(0,1) 
+
+pc = new Random()//
+pc.MCellRan4(highindex+6)
+pc.normal(5,5) 
+
+fs = new Random()            // basket
+fs.MCellRan4(highindex+5)   
+fs.normal(2.5,0.85)  // variance= SEM*sqrt(n) from scanziani sem=.2 n=18
+
+rs = new Random()// bistratified
+rs.MCellRan4(highindex+7)
+rs.normal(4.2,1.75) // variance= SEM*sqrt(n) from scanziani sem=.3 n=34
+
+rex = new Random()
+rex.MCellRan4(highindex+8)
+rex.uniform(0, 28858) 
+
+rexfs = new Random()
+rexfs.MCellRan4(highindex+9)
+rexfs.uniform(0,nfs)
+
+rexrs = new Random()
+rexrs.MCellRan4(highindex+9)
+rexrs.uniform(0,nrs)  
+
+rob = new Random()
+rob.MCellRan4(highindex+10)
+rob.uniform(0, APIDENDMAX-1)
+
+rtrp = new Random()
+rtrp.MCellRan4(highindex+11)
+rtrp.uniform(0, USER5MAX-1)
+
+ror = new Random()
+ror.MCellRan4(highindex+12)
+ror.uniform(0, BASDENDMAX-1)
+
+
+totSyn=28868+1379
+
+
+access soma
+soma distance()
+
+proc advance() {
+	fadvance()		
+	
+	doNotify()
+}
+
+
+
+while(nsyn<650){
+
+for r=0, sim{ // how many sims per syn #
+
+	
+fssin=int((27.771*log(nsyn) - 65.645)*nfs*0.01)   
+rssin=int((39.959*log(nsyn) - 160.57)*nrs*0.01)
+
+if (fssin<=0){fssin=0}
+if (fssin>=nfs){fssin=nfs}
+if (rssin<=0){rssin=0}
+if (rssin>=nrs){rssin=nrs}
+
+for (j=0; j <= nsyn-1; j +=1) {
+
+ c=int(rex.repick())
+ loc=rd.repick()
+
+ 	
+if (c<14425){               //obliques exc
+  den=int(rob.repick())
+
+apical_dendrite[den]{
+	Ens[j] = new NetStim(loc)
+	syn[j] = new Exp2Syn(loc)
+	nc[j] = new NetCon(Ens[j], syn[j],0,0,((A*distance(loc)^2)+B)*1.e-6)  
+ }
+}
+
+if (c>14424 && c<14429){// trunk apical prox exc
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loc)<100){
+user5[den]{
+	Ens[j] = new NetStim(loc)
+	syn[j] = new Exp2Syn(loc)
+	nc[j] = new NetCon(Ens[j], syn[j],0,0,((A*distance(loc)^2)+B)*1.e-6) 
+	}}else{j=j-1}}
+
+if (c>14428 && c<14706){ //trunk apical med exc
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loc)>100 && distance(loc)<350){
+user5[den]{
+	
+	Ens[j] = new NetStim(loc)
+	syn[j] = new Exp2Syn(loc)
+	nc[j] = new NetCon(Ens[j], syn[j],0,0,((A*distance(loc)^2)+B)*1.e-6)  
+	
+	}}else{j=j-1}
+}
+
+if (c>14705 && c<16877){      //trunk apical distal exc
+
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loc)>350 && distance(loc)<550){ 
+user5[den]{
+	Ens[j] = new NetStim(loc)
+	syn[j] = new Exp2Syn(loc)
+	nc[j] = new NetCon(Ens[j], syn[j],0,0,((A*distance(loc)^2)+B)*1.e-6) 
+	}}else{j=j-1}
+}
+
+if (c>16876 && c<17123){//basal prox exc
+
+den=int(ror.repick())
+access dendrite[den]
+ 
+ if (distance(loc)<50){
+dendrite[den]{
+	Ens[j] = new NetStim(loc)
+	syn[j] = new Exp2Syn(loc)
+	nc[j] = new NetCon(Ens[j], syn[j],0,0,((A*distance(loc)^2)+B)*1.e-6)  
+
+	}}else{j=j-1}
+}
+
+if (c>17122){ //basal distal exc
+
+den=int(ror.repick())
+access dendrite[den]
+ 
+ if (distance(loc)>50){
+dendrite[den]{
+	Ens[j] = new NetStim(loc)
+	syn[j] = new Exp2Syn(loc)
+	nc[j] = new NetCon(Ens[j], syn[j],0,0,((A*distance(loc)^2)+B)*1.e-6) 
+
+	}}else{j=j-1}
+}
+	Ens[j].number = 1
+	Ens[j].start=pc.repick()
+	Ens[j].interval=0
+	Ens[j].noise=0
+	syn[j].e=0
+	syn[j].tau1 = TAU1e
+	syn[j].tau2 = TAU2e
+}
+
+
+for (y=0; y <= fssin-1; y +=1) {
+loci=rd.repick()
+
+d=int(rexfs.repick())
+
+if (d<193){     // trunk apical prox inhi
+
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loci)<100){ //FS
+user5[den]{
+
+	Ensi[y] = new NetStim(loci)
+	Ensi[y].number = 1
+	Ensi[y].interval = 0
+	Ensi[y].start=fs.repick()
+	Ensi[y].noise=0 
+	
+	syni[y] = new Exp2Syn(loci)
+	syni[y].e=-80
+	syni[y].tau1 = TAU1i
+	syni[y].tau2 = TAU2i
+	
+	nci[y] = new NetCon(Ensi[y],syni[y],0,0,fs_sil)
+
+	}}else{y=y-1}}else{
+
+den=int(ror.repick())//basal prox inhi
+access dendrite[den]
+ 
+ if (distance(loci)<50){ //FS
+dendrite[den]{
+	Ensi[y] = new NetStim(loci)
+	Ensi[y].number = 1
+	Ensi[y].interval = 0
+	Ensi[y].start=fs.repick()
+	Ensi[y].noise=0 
+	
+	syni[y] = new Exp2Syn(loci)
+	syni[y].e=-80
+	syni[y].tau1 = TAU1i
+	syni[y].tau2 = TAU2i
+	
+	nci[y] = new NetCon(Ensi[y],syni[y],0,0,fs_sil)
+    
+	}}else{y=y-1}}}
+	
+	for (q=0; q <= rssin-1; q +=1) {
+       loci=rd.repick()
+       m=int(rexrs.repick())
+
+	
+if (m<438){ 
+
+den=int(rob.repick()) //obliques inhi
+
+apical_dendrite[den]{
+
+  Ensii[q] = new NetStim(loci)
+	Ensii[q].number = 1
+	Ensii[q].interval = 0
+  Ensii[q].noise=0 
+	
+	synii[q] = new Exp2Syn(loci)
+	synii[q].e=-80
+  synii[q].tau1 = TAU1i
+  synii[q].tau2 = TAU2i
+	
+	if (distance(loci)>100){
+    
+	Ensii[q].start=fs.repick()
+	ncii[q] = new NetCon(Ensii[q],synii[q],0,0,rs_sil) 
+	
+	}else{
+	
+  Ensii[q].start=fs.repick()
+	ncii[q] = new NetCon(Ensii[q],synii[q],0,0,fs_sil) 
+
+	}
+}
+}
+
+
+if (m>437 && m<485){  //trunk dist inhi
+
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loci)>350 && distance(loci)<550){ 
+user5[den]{
+	Ensii[q] = new NetStim(loci)
+	Ensii[q].number = 1
+	Ensii[q].interval = 0
+	Ensii[q].start=fs.repick()
+	Ensii[q].noise=0 
+	
+	synii[q] = new Exp2Syn(loci)
+	synii[q].e=-80
+	synii[q].tau1 = TAU1i
+	synii[q].tau2 = TAU2i
+	
+	ncii[q] = new NetCon(Ensii[q],synii[q],0,0,rs_sil)
+	
+	}}else{q=q-1}
+}
+
+if (m>484 && m<890){ // oriens dist inhi
+
+den=int(ror.repick())
+access dendrite[den]
+ 
+ if (distance(loci)>50){
+	dendrite[den]{
+	Ensii[q] = new NetStim(loci)
+	Ensii[q].number = 1
+	Ensii[q].interval = 0
+	Ensii[q].start=fs.repick()
+	Ensii[q].noise=0 
+	
+	synii[q] = new Exp2Syn(loci)
+	synii[q].e=-80
+	synii[q].tau1 = TAU1i
+	synii[q].tau2 = TAU2i
+	
+	ncii[q] = new NetCon(Ensii[q],synii[q],0,0,rs_sil)
+    
+	}}else{q=q-1}
+}
+	
+if (m>889){  //trunk dist inhi
+
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loci)>100 && distance(loci)<350){ 
+user5[den]{
+	Ensii[q] = new NetStim(loci)
+	Ensii[q].number = 1
+	Ensii[q].interval = 0
+	Ensii[q].start=fs.repick()
+	Ensii[q].noise=0 
+	
+	synii[q] = new Exp2Syn(loci)
+	synii[q].e=-80
+	synii[q].tau1 = TAU1i
+	synii[q].tau2 = TAU2i
+	
+	ncii[q] = new NetCon(Ensii[q], synii[q],0,0,rs_sil)
+
+
+	
+	}}else{q=q-1}
+}}
+	
+	for (q=0; q <= rssin-1; q +=1) {
+       loci=rd.repick()
+       m=int(rexrs.repick())
+
+	
+if (m<438){ 
+
+den=int(rob.repick()) //obliques inhi
+
+apical_dendrite[den]{
+ Ensii[q] = new NetStim(loci)
+ synii[q] = new Exp2Syn(loci)
+	if (distance(loci)>100){
+	Ensii[q].start=fs.repick()
+	ncii[q] = new NetCon(Ensii[q], synii[q],0,0,rs_sil)
+
+	}else{
+    Ensii[q].start=fs.repick()
+	ncii[q] = new NetCon(Ensii[q],synii[q],0,0,fs_sil) 
+	
+	}
+}
+}
+
+
+if (m>437 && m<485){  //trunk dist inhi
+
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loci)>350 && distance(loci)<550){ 
+user5[den]{
+	Ensii[q] = new NetStim(loci)
+	Ensii[q].start=fs.repick()
+	synii[q] = new Exp2Syn(loci)
+	ncii[q] = new NetCon(Ensii[q], synii[q],0,0,rs_sil)
+	}}else{q=q-1}
+}
+
+if (m>484 && m<890){ // oriens dist inhi
+
+den=int(ror.repick())
+access dendrite[den]
+ 
+ if (distance(loci)>50){
+	dendrite[den]{
+	Ensii[q] = new NetStim(loci)
+	Ensii[q].start=fs.repick()
+	synii[q] = new Exp2Syn(loci)
+	ncii[q] = new NetCon(Ensii[q], synii[q],0,0,rs_sil)
+    
+		
+	}}else{q=q-1}
+}
+	
+if (m>889){  //trunk dist inhi
+
+den=int(rtrp.repick())
+access user5[den]
+ 
+ if (distance(loci)>100 && distance(loci)<350){ 
+user5[den]{
+	Ensii[q] = new NetStim(loci)
+	Ensii[q].start=fs.repick()
+	synii[q] = new Exp2Syn(loci)
+	ncii[q] = new NetCon(Ensii[q], synii[q],0,0,rs_sil)
+	
+	}}else{q=q-1}
+}
+	Ensii[q].number = 1
+	Ensii[q].interval = 0
+	Ensii[q].noise=0 
+	synii[q].e=-80
+	synii[q].tau1 = TAU1i
+	synii[q].tau2 = TAU2i
+}
+forsec "soma" {    
+apc = new APCount(.5)
+apc.thresh=-20
+}
+
+run()
+
+apcc=apcc+apc.n
+print "sim# = ", r+1, "#syn = ", nsyn," Spike Prob. (%) = ",apcc/(r+1)
+
+}	
+
+u.line(nsyn, apcc/(r+1))
+u.flush()	
+
+
+nsyn=nsyn+80  // nsyn=nsyn+1 to replicate the paper, it was changed to speed up simulations
+apcc=0
+}
+
+forall delete_section()
